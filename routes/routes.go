@@ -11,6 +11,9 @@ func RegisterRoutes(r chi.Router, app *app.App) {
 	r.Route("/user", func(r chi.Router) {
 		r.Post("/", handlers.CreateUserHandler(app))
 		r.Get("/", handlers.GetAllUsersHandler(app))
+		r.Get("/{id}", handlers.GetUserByIdHandler(app))
+		r.Get("/email/{email}", handlers.GetUserByEmailHandler(app))
 		r.Put("/", handlers.UpdateUserHandler(app))
+		r.Delete("/{id}", handlers.DeleteUserHandler(app))
 	})
 }
