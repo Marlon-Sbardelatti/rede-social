@@ -52,8 +52,12 @@ func GetAllUsersHandler(app *app.App) http.HandlerFunc {
 		res, err := session.Run(
 			ctx,
 			`MATCH (u:User)
-			OPTIONAL MATCH (u)-[:FOLLOWS]->(f:User)
-			RETURN u, collect(id(f)) AS follows`,
+			 OPTIONAL MATCH (u)-[:FOLLOWS]->(f:User)
+			 OPTIONAL MATCH (follower:User)-[:FOLLOWS]->(u)
+			RETURN 
+				u, 
+				collect(DISTINCT id(f)) AS follows,
+				collect(DISTINCT id(follower)) AS followers`,
 			nil,
 		)
 
@@ -66,7 +70,8 @@ func GetAllUsersHandler(app *app.App) http.HandlerFunc {
 		for res.Next(ctx) {
 			record := res.Record()
 
-			follows := getFollows(record)
+			follows := getIDsRecord(record, "follows")
+			followers := getIDsRecord(record, "followers")
 
 			node, ok := record.Get("u")
 			if ok {
@@ -78,6 +83,7 @@ func GetAllUsersHandler(app *app.App) http.HandlerFunc {
 					Email:    user_attr["email"].(string),
 					Password: user_attr["password"].(string),
 					Follows:  follows,
+					Followers: followers,
 				}
 
 				users = append(users, user)
@@ -111,9 +117,14 @@ func GetUserByIdHandler(app *app.App) http.HandlerFunc {
 
 		res, err := session.Run(
 			ctx,
-			`MATCH (u: User) WHERE id(u) = $id 
-			 OPTIONAL MATCH (u)-[:FOLLOWS]->(f:User) 
-			 RETURN id(u) AS id, properties(u) AS props, collect(id(f)) as follows`,
+			`MATCH (u:User) WHERE id(u) = $id
+			 OPTIONAL MATCH (u)-[:FOLLOWS]->(f:User)
+			 OPTIONAL MATCH (follower:User)-[:FOLLOWS]->(u)
+			 RETURN 
+				id(u) AS id, 
+				properties(u) AS props, 
+				collect(DISTINCT id(f)) AS follows,
+				collect(DISTINCT id(follower)) AS followers`,
 			map[string]any{"id": id},
 		)
 
@@ -141,7 +152,12 @@ func GetUserByEmailHandler(app *app.App) http.HandlerFunc {
 			ctx,
 			`MATCH (u:User) WHERE u.email = $email 
 			 OPTIONAL MATCH (u)-[:FOLLOWS]->(f:User)
-			 RETURN id(u) AS id, properties(u) AS props, collect(id(f)) as follows`,
+			 OPTIONAL MATCH (follower:User)-[:FOLLOWS]->(u)
+			 RETURN 
+				id(u) AS id, 
+				properties(u) AS props, 
+				collect(DISTINCT id(f)) AS follows,
+				collect(DISTINCT id(follower)) AS followers`,
 			map[string]any{"email": email},
 		)
 		if err != nil {
@@ -178,8 +194,13 @@ func UpdateUserHandler(app *app.App) http.HandlerFunc {
 			`MATCH (u:User) 
 			 WHERE id(u) = $id 
 			 OPTIONAL MATCH (u)-[:FOLLOWS]->(f:User)
+			 OPTIONAL MATCH (follower:User)-[:FOLLOWS]->(u)
 			 SET u.name = $name, u.email = $email, u.password = $password 
-			 RETURN id(u) AS id, properties(u) AS props, collect(id(f)) as follows`,
+			 RETURN 
+				id(u) AS id, 
+				properties(u) AS props, 
+				collect(DISTINCT id(f)) AS follows,
+				collect(DISTINCT id(follower)) AS followers`,
 			map[string]any{
 				"id":       user.Id,
 				"name":     user.Name,
@@ -354,7 +375,9 @@ func recordToJSON(ctx context.Context, w http.ResponseWriter, res neo4j.ResultWi
 		return nil
 	}
 
-	follows := getFollows(record)
+	follows := getIDsRecord(record, "follows")
+
+	followers := getIDsRecord(record, "followers")
 
 	propsMap, ok := props.(map[string]any)
 	if !ok {
@@ -365,6 +388,7 @@ func recordToJSON(ctx context.Context, w http.ResponseWriter, res neo4j.ResultWi
 	propsMap["id"] = resId
 	if follows != nil {
 		propsMap["follows"] = follows
+		propsMap["followers"] = followers 
 	}
 
 	user, err := json.Marshal(propsMap)
@@ -376,8 +400,8 @@ func recordToJSON(ctx context.Context, w http.ResponseWriter, res neo4j.ResultWi
 	return user
 }
 
-func getFollows(record *neo4j.Record) []int64 {
-	followsAny, ok := record.Get("follows")
+func getIDsRecord(record *neo4j.Record, prop string) []int64 {
+	followsAny, ok := record.Get(prop)
 	var idList []int64
 	if ok {
 		// transforma de any para []any

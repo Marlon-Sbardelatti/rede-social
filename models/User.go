@@ -6,4 +6,5 @@ type User struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 	Follows []int64 `json:"follows,omitempty"`
+	Followers []int64 `json:"followers,omitempty"`
 }
