@@ -4,16 +4,14 @@ import "time"
 
 type Post struct {
 	Id          int64   
-	UserID      int64   
 	Description string  
 	Likes       []int64 
-	Images      [][]byte
+	Images      []string
 	CreatedAt   time.Time
 }
 
-func NewPost(userId int64, description string, images [][]byte) *Post {
+func NewPost(description string, images []string) *Post {
 	return &Post{
-		UserID: userId,
 		Description: description,
 		Images: images,
 		CreatedAt: time.Now(),

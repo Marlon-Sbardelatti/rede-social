@@ -18,4 +18,8 @@ func RegisterRoutes(r chi.Router, app *app.App) {
 		r.Put("/", handlers.UpdateUserHandler(app))
 		r.Delete("/{id}", handlers.DeleteUserHandler(app))
 	})
+
+	r.Route("/post", func(r chi.Router) {
+		r.Post("/", handlers.CreatePostRequest(app))
+	})
 }

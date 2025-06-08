@@ -3,7 +3,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -28,9 +31,11 @@ func CreateUserHandler(app *app.App) http.HandlerFunc {
 			return
 		}
 
-		_, err = session.Run(
+		res, err := session.Run(
 			ctx,
-			"CREATE (u: User{name: $name, email: $email, password: $password})",
+			`CREATE (u: User{name: $name, email: $email, password: $password})
+			 RETURN 
+				id(u) AS id`,
 			map[string]any{"name": user.Name, "email": user.Email, "password": user.Password},
 		)
 
@@ -38,9 +43,36 @@ func CreateUserHandler(app *app.App) http.HandlerFunc {
 			http.Error(w, "DB operation failed", http.StatusInternalServerError)
 			return
 		}
+
+		record, err := res.Single(ctx)
+		if err != nil {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+
+		resId, ok := record.Get("id")
+		if !ok {
+			http.Error(w, "Error getting user ID", http.StatusInternalServerError)
+			return
+		}
+
+		userIdInt, ok := resId.(int64)
+		if !ok {
+			http.Error(w, "Invalid user ID type", http.StatusInternalServerError)
+			return
+		}
+
+		createUserImgsDir(userIdInt)
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte("User created"))
 	}
+}
+
+func createUserImgsDir(id int64) {
+	if err := os.MkdirAll(fmt.Sprintf("imgs/user-%d", id), os.ModePerm); err != nil {
+		log.Fatal(err)
+	}
+
 }
 
 func GetAllUsersHandler(app *app.App) http.HandlerFunc {
@@ -78,11 +110,11 @@ func GetAllUsersHandler(app *app.App) http.HandlerFunc {
 				user_attr := node.(neo4j.Node).Props
 
 				user := models.User{
-					Id:       node.(neo4j.Node).GetId(),
-					Name:     user_attr["name"].(string),
-					Email:    user_attr["email"].(string),
-					Password: user_attr["password"].(string),
-					Follows:  follows,
+					Id:        node.(neo4j.Node).GetId(),
+					Name:      user_attr["name"].(string),
+					Email:     user_attr["email"].(string),
+					Password:  user_attr["password"].(string),
+					Follows:   follows,
 					Followers: followers,
 				}
 
@@ -388,7 +420,7 @@ func recordToJSON(ctx context.Context, w http.ResponseWriter, res neo4j.ResultWi
 	propsMap["id"] = resId
 	if follows != nil {
 		propsMap["follows"] = follows
-		propsMap["followers"] = followers 
+		propsMap["followers"] = followers
 	}
 
 	user, err := json.Marshal(propsMap)
