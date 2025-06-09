@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"main.go/app"
+	"main.go/models"
 )
 
 func CreatePostRequest(app *app.App) http.HandlerFunc {
@@ -141,4 +143,80 @@ func addImages(w http.ResponseWriter, r *http.Request, userId int64, postId int6
 	}
 
 	return imagePaths
+}
+
+func GetAllPostsHandler(app *app.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		session := app.DB.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
+		defer session.Close(ctx)
+
+		res, err := session.Run(
+			ctx,
+			`MATCH (p:Post)<-[r:POSTED]-(u:User)
+			OPTIONAL MATCH (l:User)-[r:LIKED]->(p) 
+			RETURN 
+				p AS post, 
+				id(u) AS authorId,
+				collect(DISTINCT id(l)) AS likes
+			ORDER BY p.createdAt DESC`,
+			nil,
+		)
+
+		if err != nil {
+			http.Error(w, "DB operation failed", http.StatusInternalServerError)
+			return
+		}
+
+		var posts []models.Post
+		for res.Next(ctx) {
+			record := res.Record()
+
+			likes := getIDsRecord(record, "likes")
+			images := getImagesRecord(record, "images")
+			//createdAt := parseTimeFieldRecord(record, "createdAt")
+
+			node, ok := record.Get("post")
+			if ok {
+				post_attr := node.(neo4j.Node).Props
+
+				post := models.Post{
+					Id:        		node.(neo4j.Node).GetId(),
+					Description: 	post_attr["description"].(string),
+					Likes:     		likes,
+					Images:  		images,
+					CreatedAt:		time.Time{},
+				}
+
+					posts = append(posts, post)
+			}
+		}
+
+		postsJson, err := json.Marshal((posts))
+		if err != nil {
+			http.Error(w, "Error encoding posts to JSON", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Conten-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(postsJson)
+	}
+}
+
+func getImagesRecord(record *neo4j.Record, prop string) []string {
+	imagesAny, ok := record.Get(prop)
+	var imagesList []string
+	if ok {
+		follows, ok := imagesAny.([]any)
+		if ok {
+			for _, f := range follows {
+				if imageStr, ok := f.(string); ok {
+					imagesList = append(imagesList, imageStr)
+				}
+			}
+		}
+	}
+
+	return imagesList
 }
