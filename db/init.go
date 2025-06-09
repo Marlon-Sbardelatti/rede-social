@@ -14,20 +14,21 @@ func InitDB() (neo4j.DriverWithContext, error) {
 
 	err := godotenv.Load(".env")
 	if err != nil {
-		return nil, fmt.Errorf("Arquivo de configuração .env não encontrado, erro: %v", err)
+		return nil, fmt.Errorf("arquivo de configuração .env não encontrado, erro: %v", err)
 	}
 
 	user := os.Getenv("USR")
 	psw := os.Getenv("PSW")
+	uri := os.Getenv("URI")
 
-	driver, err := neo4j.NewDriverWithContext("bolt://localhost:7687", neo4j.BasicAuth(user, psw, ""))
+	driver, err := neo4j.NewDriverWithContext(uri, neo4j.BasicAuth(user, psw, ""))
 	if err != nil {
-		return nil, fmt.Errorf("Não foi possível se conectar ao drive do neo4j, erro: %v", err)
+		return nil, fmt.Errorf("não foi possível se conectar ao driver do neo4j, erro: %v", err)
 	}
 
 	err = driver.VerifyConnectivity(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("Não foi possível estabelecer uma conexão com o neo4j, erro: %v", err)
+		return nil, fmt.Errorf("não foi possível estabelecer uma conexão com o neo4j, erro: %v", err)
 	}
 	fmt.Println("Conexão estabelecida!")
 	return driver, nil

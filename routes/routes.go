@@ -7,7 +7,7 @@ import (
 )
 
 func RegisterRoutes(r chi.Router, app *app.App) {
-	// User
+
 	r.Route("/user", func(r chi.Router) {
 		r.Post("/", handlers.CreateUserHandler(app))
 		r.Post("/{id}/follow/{second-id}", handlers.FollowUserHandler(app))
@@ -19,7 +19,8 @@ func RegisterRoutes(r chi.Router, app *app.App) {
 		r.Delete("/{id}", handlers.DeleteUserHandler(app))
 	})
 
-	r.Route("/post", func(r chi.Router) {
+	r.Route("/posts", func(r chi.Router) {
 		r.Post("/", handlers.CreatePostRequest(app))
+		r.Get("/", handlers.GetAllPostsHandler(app))
 	})
 }
