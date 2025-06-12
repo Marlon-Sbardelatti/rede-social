@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"golang.org/x/crypto/bcrypt"
 	"main.go/app"
 	"main.go/models"
 )
@@ -32,12 +33,18 @@ func CreateUserHandler(app *app.App) http.HandlerFunc {
 			return
 		}
 
+		psw, err := hashPassword(user.Password)
+		if err != nil {
+			http.Error(w, "Failed to hash user password", http.StatusInternalServerError)
+			return
+		}
+
 		res, err := session.Run(
 			ctx,
 			`CREATE (u: User{name: $name, email: $email, password: $password})
 			 RETURN 
 				id(u) AS id`,
-			map[string]any{"name": user.Name, "email": user.Email, "password": user.Password},
+			map[string]any{"name": user.Name, "email": user.Email, "password": psw},
 		)
 
 		if err != nil {
@@ -613,4 +620,14 @@ func usersToJson(ctx context.Context, res neo4j.ResultWithContext, prop string) 
 	}
 
 	return usersJson, nil
+}
+
+func hashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 10)
+	return string(bytes), err
+}
+
+func checkPasswordHash(password string, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
 }
