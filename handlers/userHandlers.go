@@ -448,7 +448,7 @@ func LikePostRequest(app *app.App) http.HandlerFunc {
 			ctx,
 			`MATCH (u:User), (p:Post)
 			 WHERE id(u) = $id AND id(p) = $postId
-			 MERGE (u)-[r:LIKES]->(p)
+			 MERGE (u)-[r:LIKED]->(p)
 			 RETURN COUNT(r) as count`,
 			map[string]any{"id": id, "postId": postId},
 		)
@@ -476,6 +476,60 @@ func LikePostRequest(app *app.App) http.HandlerFunc {
 		}
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte("Liked"))
+	}
+}
+
+func DislikePostRequest(app *app.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		session := app.DB.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
+		defer session.Close(ctx)
+
+		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		if err != nil {
+			http.Error(w, "Couldn't parse the url param", http.StatusInternalServerError)
+			return
+		}
+
+		postId, err := strconv.ParseInt(chi.URLParam(r, "post-id"), 10, 64)
+		if err != nil {
+			http.Error(w, "Couldn't parse the url param", http.StatusInternalServerError)
+			return
+		}
+
+		res, err := session.Run(
+			ctx,
+			`MATCH (u:User)-[r:LIKED]->(p:Post)
+			 WHERE id(u) = $id AND id(p) = $postId
+			 DELETE r
+			 RETURN COUNT(r) as count`,
+			map[string]any{"id": id, "postId": postId},
+		)
+
+		if err != nil {
+			http.Error(w, "DB operation failed", http.StatusInternalServerError)
+			return
+		}
+
+		record, err := res.Single(ctx)
+		if err != nil {
+			http.Error(w, "Unexpected DB result", http.StatusNotFound)
+			return
+		}
+
+		count, ok := record.Get("count")
+		if !ok {
+			http.Error(w, "Error getting existence result", http.StatusInternalServerError)
+			return
+		}
+
+		if count.(int64) == 0 {
+			http.Error(w, "User or Post not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte("Liked"))
+
 	}
 }
 
