@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -84,12 +85,7 @@ func GetAllUsersHandler(app *app.App) http.HandlerFunc {
 		res, err := session.Run(
 			ctx,
 			`MATCH (u:User)
-			 OPTIONAL MATCH (u)-[:FOLLOWS]->(f:User)
-			 OPTIONAL MATCH (follower:User)-[:FOLLOWS]->(u)
-			RETURN 
-				u, 
-				collect(DISTINCT id(f)) AS follows,
-				collect(DISTINCT id(follower)) AS followers`,
+			RETURN u`,
 			nil,
 		)
 
@@ -98,33 +94,9 @@ func GetAllUsersHandler(app *app.App) http.HandlerFunc {
 			return
 		}
 
-		var users []models.User
-		for res.Next(ctx) {
-			record := res.Record()
-
-			follows := getIDsRecord(record, "follows")
-			followers := getIDsRecord(record, "followers")
-
-			node, ok := record.Get("u")
-			if ok {
-				user_attr := node.(neo4j.Node).Props
-
-				user := models.User{
-					Id:        node.(neo4j.Node).GetId(),
-					Name:      user_attr["name"].(string),
-					Email:     user_attr["email"].(string),
-					Password:  user_attr["password"].(string),
-					Follows:   follows,
-					Followers: followers,
-				}
-
-				users = append(users, user)
-			}
-		}
-
-		usersJson, err := json.Marshal(users)
+		usersJson, err := usersToJson(ctx, res, "u")
 		if err != nil {
-			http.Error(w, "Error encoding users to JSON", http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -150,13 +122,9 @@ func GetUserByIdHandler(app *app.App) http.HandlerFunc {
 		res, err := session.Run(
 			ctx,
 			`MATCH (u:User) WHERE id(u) = $id
-			 OPTIONAL MATCH (u)-[:FOLLOWS]->(f:User)
-			 OPTIONAL MATCH (follower:User)-[:FOLLOWS]->(u)
 			 RETURN 
 				id(u) AS id, 
-				properties(u) AS props, 
-				collect(DISTINCT id(f)) AS follows,
-				collect(DISTINCT id(follower)) AS followers`,
+				properties(u) AS props`,
 			map[string]any{"id": id},
 		)
 
@@ -183,13 +151,9 @@ func GetUserByEmailHandler(app *app.App) http.HandlerFunc {
 		res, err := session.Run(
 			ctx,
 			`MATCH (u:User) WHERE u.email = $email 
-			 OPTIONAL MATCH (u)-[:FOLLOWS]->(f:User)
-			 OPTIONAL MATCH (follower:User)-[:FOLLOWS]->(u)
 			 RETURN 
 				id(u) AS id, 
-				properties(u) AS props, 
-				collect(DISTINCT id(f)) AS follows,
-				collect(DISTINCT id(follower)) AS followers`,
+				properties(u) AS props`,
 			map[string]any{"email": email},
 		)
 		if err != nil {
@@ -225,14 +189,10 @@ func UpdateUserHandler(app *app.App) http.HandlerFunc {
 			ctx,
 			`MATCH (u:User) 
 			 WHERE id(u) = $id 
-			 OPTIONAL MATCH (u)-[:FOLLOWS]->(f:User)
-			 OPTIONAL MATCH (follower:User)-[:FOLLOWS]->(u)
 			 SET u.name = $name, u.email = $email, u.password = $password 
 			 RETURN 
 				id(u) AS id, 
-				properties(u) AS props, 
-				collect(DISTINCT id(f)) AS follows,
-				collect(DISTINCT id(follower)) AS followers`,
+				properties(u) AS props`,
 			map[string]any{
 				"id":       user.Id,
 				"name":     user.Name,
@@ -388,6 +348,137 @@ func UnfollowUserHandler(app *app.App) http.HandlerFunc {
 	}
 }
 
+func GetFollowersRequest(app *app.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		session := app.DB.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
+		defer session.Close(ctx)
+
+		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		if err != nil {
+			http.Error(w, "Couldn't parse the url param", http.StatusInternalServerError)
+			return
+		}
+
+		res, err := session.Run(
+			ctx,
+			`MATCH (target: User) 
+			 WHERE id(target) = $id
+			 MATCH (follower:User)-[:FOLLOWS]->(target)
+			 RETURN follower`,
+			map[string]any{"id": id},
+		)
+
+		if err != nil {
+			http.Error(w, "DB operation failed", http.StatusInternalServerError)
+			return
+		}
+
+		usersJson, err := usersToJson(ctx, res, "follower")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Conten-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(usersJson)
+
+	}
+}
+
+func GetFollowingRequest(app *app.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		session := app.DB.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
+		defer session.Close(ctx)
+
+		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		if err != nil {
+			http.Error(w, "Couldn't parse the url param", http.StatusInternalServerError)
+			return
+		}
+
+		res, err := session.Run(
+			ctx,
+			`MATCH (u: User) 
+			 WHERE id(u) = $id
+			 MATCH (u)-[:FOLLOWS]->(followed:User)
+			 RETURN followed`,
+			map[string]any{"id": id},
+		)
+
+		if err != nil {
+			http.Error(w, "DB operation failed", http.StatusInternalServerError)
+			return
+		}
+
+		usersJson, err := usersToJson(ctx, res, "followed")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Conten-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(usersJson)
+
+	}
+}
+
+func LikePostRequest(app *app.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		session := app.DB.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
+		defer session.Close(ctx)
+
+		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		if err != nil {
+			http.Error(w, "Couldn't parse the url param", http.StatusInternalServerError)
+			return
+		}
+
+		postId, err := strconv.ParseInt(chi.URLParam(r, "post-id"), 10, 64)
+		if err != nil {
+			http.Error(w, "Couldn't parse the url param", http.StatusInternalServerError)
+			return
+		}
+
+		res, err := session.Run(
+			ctx,
+			`MATCH (u:User), (p:Post)
+			 WHERE id(u) = $id AND id(p) = $postId
+			 MERGE (u)-[r:LIKES]->(p)
+			 RETURN COUNT(r) as count`,
+			map[string]any{"id": id, "postId": postId},
+		)
+
+		if err != nil {
+			http.Error(w, "DB operation failed", http.StatusInternalServerError)
+			return
+		}
+
+		record, err := res.Single(ctx)
+		if err != nil {
+			http.Error(w, "Unexpected DB result", http.StatusNotFound)
+			return
+		}
+
+		count, ok := record.Get("count")
+		if !ok {
+			http.Error(w, "Error getting existence result", http.StatusInternalServerError)
+			return
+		}
+
+		if count.(int64) == 0 {
+			http.Error(w, "User or Post not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte("Liked"))
+	}
+}
+
 func recordToJSON(ctx context.Context, w http.ResponseWriter, res neo4j.ResultWithContext) []byte {
 	record, err := res.Single(ctx)
 	if err != nil {
@@ -407,10 +498,6 @@ func recordToJSON(ctx context.Context, w http.ResponseWriter, res neo4j.ResultWi
 		return nil
 	}
 
-	follows := getIDsRecord(record, "follows")
-
-	followers := getIDsRecord(record, "followers")
-
 	propsMap, ok := props.(map[string]any)
 	if !ok {
 		http.Error(w, "Error converting properties", http.StatusInternalServerError)
@@ -418,10 +505,6 @@ func recordToJSON(ctx context.Context, w http.ResponseWriter, res neo4j.ResultWi
 	}
 
 	propsMap["id"] = resId
-	if follows != nil {
-		propsMap["follows"] = follows
-		propsMap["followers"] = followers
-	}
 
 	user, err := json.Marshal(propsMap)
 	if err != nil {
@@ -448,4 +531,32 @@ func getIDsRecord(record *neo4j.Record, prop string) []int64 {
 	}
 
 	return idList
+}
+
+func usersToJson(ctx context.Context, res neo4j.ResultWithContext, prop string) ([]byte, error) {
+	var users []models.User
+	for res.Next(ctx) {
+		record := res.Record()
+
+		node, ok := record.Get(prop)
+		if ok {
+			user_attr := node.(neo4j.Node).Props
+
+			user := models.User{
+				Id:       node.(neo4j.Node).GetId(),
+				Name:     user_attr["name"].(string),
+				Email:    user_attr["email"].(string),
+				Password: user_attr["password"].(string),
+			}
+
+			users = append(users, user)
+		}
+	}
+
+	usersJson, err := json.Marshal(users)
+	if err != nil {
+		return nil, errors.New("Error encoding users to JSON")
+	}
+
+	return usersJson, nil
 }

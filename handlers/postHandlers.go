@@ -39,7 +39,6 @@ func CreatePostRequest(app *app.App) http.HandlerFunc {
 			`MATCH (u:User) WHERE id(u) = $user_id
 				CREATE (p:Post {
 					description: $description,
-					likes: $likes,
 					created_at: $created_at
 				})
 				CREATE (u)-[:POSTED]->(p)
@@ -47,7 +46,6 @@ func CreatePostRequest(app *app.App) http.HandlerFunc {
 			map[string]any{
 				"user_id":     userId,
 				"description": r.FormValue("description"),
-				"likes":       []int64{},
 				"created_at":  time.Now().UTC().Format(time.RFC3339),
 			},
 		)
@@ -98,6 +96,7 @@ func CreatePostRequest(app *app.App) http.HandlerFunc {
 
 	}
 }
+
 
 func addImages(w http.ResponseWriter, r *http.Request, userId int64, postId int64) []string {
 	files := r.MultipartForm.File["images"]
@@ -154,11 +153,9 @@ func GetAllPostsHandler(app *app.App) http.HandlerFunc {
 		res, err := session.Run(
 			ctx,
 			`MATCH (p:Post)<-[r:POSTED]-(u:User)
-			OPTIONAL MATCH (l:User)-[r:LIKED]->(p) 
 			RETURN 
 				p AS post, 
 				id(u) AS authorId,
-				collect(DISTINCT id(l)) AS likes
 			ORDER BY p.createdAt DESC`,
 			nil,
 		)
@@ -172,7 +169,6 @@ func GetAllPostsHandler(app *app.App) http.HandlerFunc {
 		for res.Next(ctx) {
 			record := res.Record()
 
-			likes := getIDsRecord(record, "likes")
 			images := getImagesRecord(record, "images")
 			//createdAt := parseTimeFieldRecord(record, "createdAt")
 
@@ -181,14 +177,13 @@ func GetAllPostsHandler(app *app.App) http.HandlerFunc {
 				post_attr := node.(neo4j.Node).Props
 
 				post := models.Post{
-					Id:        		node.(neo4j.Node).GetId(),
-					Description: 	post_attr["description"].(string),
-					Likes:     		likes,
-					Images:  		images,
-					CreatedAt:		time.Time{},
+					Id:          node.(neo4j.Node).GetId(),
+					Description: post_attr["description"].(string),
+					Images:      images,
+					CreatedAt:   time.Time{},
 				}
 
-					posts = append(posts, post)
+				posts = append(posts, post)
 			}
 		}
 
@@ -220,3 +215,4 @@ func getImagesRecord(record *neo4j.Record, prop string) []string {
 
 	return imagesList
 }
+

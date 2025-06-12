@@ -5,7 +5,6 @@ import "time"
 type Post struct {
 	Id          int64   `json:"id"`
 	Description string  `json:"description,omitempty"`
-	Likes       []int64 `json:"likes,omitempty"`
 	Images      []string `json:"images"`
 	CreatedAt   time.Time `json:"createdAt"`
 }
