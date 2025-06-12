@@ -119,10 +119,12 @@ func DeletePostRequest(app *app.App) http.HandlerFunc {
 			ctx,
 			`MATCH (u:User)-[r:POSTED]->(p:Post)
 			 WHERE id(u) = $id AND id(p) = $postId
-			 DELETE r 
+			 DETACH DELETE p 
 			 RETURN COUNT(r) as count`,
 			map[string]any{"id": id, "postId": postId},
 		)
+		// usamos detach pois o post esta relacionado a LIKED e POSTED, apenas DELETE só funciona 
+		// para nós simples sem relações
 
 		if err != nil {
 			http.Error(w, "DB operation failed", http.StatusInternalServerError)
