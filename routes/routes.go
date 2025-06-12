@@ -26,5 +26,6 @@ func RegisterRoutes(r chi.Router, app *app.App) {
 	r.Route("/posts", func(r chi.Router) {
 		r.Post("/", handlers.CreatePostRequest(app))
 		r.Get("/", handlers.GetAllPostsHandler(app))
+		r.Delete("/{post-id}/user/{id}", handlers.DeletePostRequest(app))
 	})
 }
