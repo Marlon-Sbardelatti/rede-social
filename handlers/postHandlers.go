@@ -208,7 +208,7 @@ func GetAllPostsHandler(app *app.App) http.HandlerFunc {
 
 		res, err := session.Run(ctx, `
 			MATCH (u:User)-[:POSTED]->(p:Post)
-			RETURN p, id(u) AS userId
+			RETURN p, id(u) AS userId, u.name AS userName
 		`, nil)
 		if err != nil {
 			http.Error(w, "DB operation failed", http.StatusInternalServerError)
@@ -232,6 +232,12 @@ func GetAllPostsHandler(app *app.App) http.HandlerFunc {
 				continue
 			}
 			userId := int64(userIdRaw.(int64))
+
+			userNameRaw, ok := record.Get("userName")
+			if !ok {
+				continue
+			}
+			userName := userNameRaw.(string)
 
 			var base64Images []string
 			if imagesRaw, ok := props["images"].([]any); ok {
@@ -257,8 +263,9 @@ func GetAllPostsHandler(app *app.App) http.HandlerFunc {
 			}
 
 			post := models.Post{
-				Id:          node.(neo4j.Node).GetId(),
+				Id:          postNode.GetId(),
 				UserID:      userId,
+				UserName:    userName,
 				Description: props["description"].(string),
 				Images:      base64Images,
 				CreatedAt:   createdAt,
@@ -292,7 +299,7 @@ func GetPostsFromUserRequest(app *app.App) http.HandlerFunc {
 		res, err := session.Run(ctx, `
 			MATCH (u:User)-[:POSTED]->(p:Post)
 			WHERE id(u) = $id
-			RETURN p, id(u) AS userId
+			RETURN p, id(u) AS userId, u.name AS userName
 		`, map[string]any{"id": id})
 		if err != nil {
 			http.Error(w, "DB operation failed", http.StatusInternalServerError)
@@ -303,6 +310,7 @@ func GetPostsFromUserRequest(app *app.App) http.HandlerFunc {
 
 		for res.Next(ctx) {
 			record := res.Record()
+
 			node, ok := record.Get("p")
 			if !ok {
 				continue
@@ -316,6 +324,12 @@ func GetPostsFromUserRequest(app *app.App) http.HandlerFunc {
 				continue
 			}
 			userId := int64(userIdRaw.(int64))
+
+			userNameRaw, ok := record.Get("userName")
+			if !ok {
+				continue
+			}
+			userName := userNameRaw.(string)
 
 			var base64Images []string
 			if imagesRaw, ok := props["images"].([]any); ok {
@@ -341,8 +355,9 @@ func GetPostsFromUserRequest(app *app.App) http.HandlerFunc {
 			}
 
 			post := models.Post{
-				Id:          node.(neo4j.Node).GetId(),
+				Id:          postNode.GetId(),
 				UserID:      userId,
+				UserName:    userName,
 				Description: props["description"].(string),
 				CreatedAt:   createdAt,
 				Images:      base64Images,
@@ -360,6 +375,7 @@ func GetPostsFromUserRequest(app *app.App) http.HandlerFunc {
 		json.NewEncoder(w).Encode(posts)
 	}
 }
+
 
 func getImagesRecord(record *neo4j.Record, prop string) []string {
 	imagesAny, ok := record.Get(prop)
