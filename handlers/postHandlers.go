@@ -15,7 +15,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"main.go/app"
-	"main.go/models"
 )
 
 func CreatePostRequest(app *app.App) http.HandlerFunc {
@@ -207,27 +206,40 @@ func GetAllPostsHandler(app *app.App) http.HandlerFunc {
 		defer session.Close(ctx)
 
 		res, err := session.Run(ctx, `
-			MATCH (p:Post)
-			RETURN p
+			MATCH (u:User)-[:POSTED]->(p:Post)
+			RETURN p, id(u) AS userId
 		`, nil)
 		if err != nil {
 			http.Error(w, "DB operation failed", http.StatusInternalServerError)
 			return
 		}
 
-		var posts []models.Post
+		type Post struct {
+			Id          int64     `json:"id"`
+			UserID      int64     `json:"user_id"`
+			Description string    `json:"description"`
+			Images      []string  `json:"images"`
+			CreatedAt   time.Time `json:"created_at"`
+		}
+
+		var posts []Post
 
 		for res.Next(ctx) {
 			record := res.Record()
+
 			node, ok := record.Get("p")
 			if !ok {
 				continue
 			}
-
 			postNode := node.(neo4j.Node)
 			props := postNode.Props
 
-			// Processa o campo images (array de caminhos para arquivos)
+			userIdRaw, ok := record.Get("userId")
+			if !ok {
+				continue
+			}
+			userId := int64(userIdRaw.(int64))
+
 			var base64Images []string
 			if imagesRaw, ok := props["images"].([]any); ok {
 				for _, img := range imagesRaw {
@@ -242,7 +254,6 @@ func GetAllPostsHandler(app *app.App) http.HandlerFunc {
 				}
 			}
 
-			// Converte created_at para time.Time
 			var createdAt time.Time
 			if createdAtStr, ok := props["created_at"].(string); ok {
 				createdAt, err = time.Parse(time.RFC3339, createdAtStr)
@@ -252,8 +263,9 @@ func GetAllPostsHandler(app *app.App) http.HandlerFunc {
 				}
 			}
 
-			post := models.Post{
-				Id:          node.(neo4j.Node).GetId(),
+			post := Post{
+				Id:          postNode.GetId(),
+				UserID:      userId,
 				Description: props["description"].(string),
 				Images:      base64Images,
 				CreatedAt:   createdAt,
@@ -287,14 +299,22 @@ func GetPostsFromUserRequest(app *app.App) http.HandlerFunc {
 		res, err := session.Run(ctx, `
 			MATCH (u:User)-[:POSTED]->(p:Post)
 			WHERE id(u) = $id
-			RETURN p
+			RETURN p, id(u) AS userId
 		`, map[string]any{"id": id})
 		if err != nil {
 			http.Error(w, "DB operation failed", http.StatusInternalServerError)
 			return
 		}
 
-		var posts []models.Post
+		type Post struct {
+			Id          int64     `json:"id"`
+			UserID      int64     `json:"user_id"`
+			Description string    `json:"description"`
+			CreatedAt   time.Time `json:"created_at"`
+			Images      []string  `json:"images"`
+		}
+
+		var posts []Post
 
 		for res.Next(ctx) {
 			record := res.Record()
@@ -305,6 +325,12 @@ func GetPostsFromUserRequest(app *app.App) http.HandlerFunc {
 
 			postNode := node.(neo4j.Node)
 			props := postNode.Props
+
+			userIdRaw, ok := record.Get("userId")
+			if !ok {
+				continue
+			}
+			userId := int64(userIdRaw.(int64))
 
 			var base64Images []string
 			if imagesRaw, ok := props["images"].([]any); ok {
@@ -329,11 +355,12 @@ func GetPostsFromUserRequest(app *app.App) http.HandlerFunc {
 				}
 			}
 
-			post := models.Post{
+			post := Post{
 				Id:          node.(neo4j.Node).GetId(),
+				UserID:      userId,
 				Description: props["description"].(string),
-				Images:      base64Images,
 				CreatedAt:   createdAt,
+				Images:      base64Images,
 			}
 
 			posts = append(posts, post)
