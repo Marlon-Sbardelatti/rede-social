@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"main.go/app"
+	"main.go/models"
 )
 
 func CreatePostRequest(app *app.App) http.HandlerFunc {
@@ -214,15 +215,7 @@ func GetAllPostsHandler(app *app.App) http.HandlerFunc {
 			return
 		}
 
-		type Post struct {
-			Id          int64     `json:"id"`
-			UserID      int64     `json:"user_id"`
-			Description string    `json:"description"`
-			Images      []string  `json:"images"`
-			CreatedAt   time.Time `json:"created_at"`
-		}
-
-		var posts []Post
+		var posts []models.Post
 
 		for res.Next(ctx) {
 			record := res.Record()
@@ -263,8 +256,8 @@ func GetAllPostsHandler(app *app.App) http.HandlerFunc {
 				}
 			}
 
-			post := Post{
-				Id:          postNode.GetId(),
+			post := models.Post{
+				Id:          node.(neo4j.Node).GetId(),
 				UserID:      userId,
 				Description: props["description"].(string),
 				Images:      base64Images,
@@ -306,15 +299,7 @@ func GetPostsFromUserRequest(app *app.App) http.HandlerFunc {
 			return
 		}
 
-		type Post struct {
-			Id          int64     `json:"id"`
-			UserID      int64     `json:"user_id"`
-			Description string    `json:"description"`
-			CreatedAt   time.Time `json:"created_at"`
-			Images      []string  `json:"images"`
-		}
-
-		var posts []Post
+		var posts []models.Post
 
 		for res.Next(ctx) {
 			record := res.Record()
@@ -355,7 +340,7 @@ func GetPostsFromUserRequest(app *app.App) http.HandlerFunc {
 				}
 			}
 
-			post := Post{
+			post := models.Post{
 				Id:          node.(neo4j.Node).GetId(),
 				UserID:      userId,
 				Description: props["description"].(string),
