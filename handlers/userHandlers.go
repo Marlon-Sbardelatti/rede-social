@@ -33,6 +33,18 @@ func CreateUserHandler(app *app.App) http.HandlerFunc {
 			return
 		}
 
+		// Verifica se e-mail já está em uso
+		exists, err := emailExists(ctx, session, user.Email)
+		if err != nil {
+			http.Error(w, "Failed to check email", http.StatusInternalServerError)
+			return
+		}
+		if exists {
+			http.Error(w, "Email already in use", http.StatusConflict)
+			return
+		}
+
+		// Cria usuário
 		psw, err := hashPassword(user.Password)
 		if err != nil {
 			http.Error(w, "Failed to hash user password", http.StatusInternalServerError)
@@ -41,12 +53,10 @@ func CreateUserHandler(app *app.App) http.HandlerFunc {
 
 		res, err := session.Run(
 			ctx,
-			`CREATE (u: User{name: $name, email: $email, password: $password})
-			 RETURN 
-				id(u) AS id`,
+			`CREATE (u:User {name: $name, email: $email, password: $password})
+			 RETURN id(u) AS id`,
 			map[string]any{"name": user.Name, "email": user.Email, "password": psw},
 		)
-
 		if err != nil {
 			http.Error(w, "DB operation failed", http.StatusInternalServerError)
 			return
@@ -182,13 +192,18 @@ func UpdateUserHandler(app *app.App) http.HandlerFunc {
 		session := app.DB.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
 		defer session.Close(ctx)
 
-		var user models.User
+		var user struct {
+			Id    int64  `json:"id"`
+			Name  string `json:"name"`
+			Email string `json:"email"`
+		}
+
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
 
 		err := decoder.Decode(&user)
-		if err != nil || user.Name == "" || user.Email == "" || user.Password == "" {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		if err != nil || user.Name == "" || user.Email == "" {
+			http.Error(w, "Invalid JSON or missing required fields", http.StatusBadRequest)
 			return
 		}
 
@@ -196,18 +211,16 @@ func UpdateUserHandler(app *app.App) http.HandlerFunc {
 			ctx,
 			`MATCH (u:User) 
 			 WHERE id(u) = $id 
-			 SET u.name = $name, u.email = $email, u.password = $password 
+			 SET u.name = $name, u.email = $email
 			 RETURN 
 				id(u) AS id, 
 				properties(u) AS props`,
 			map[string]any{
-				"id":       user.Id,
-				"name":     user.Name,
-				"email":    user.Email,
-				"password": user.Password,
+				"id":    user.Id,
+				"name":  user.Name,
+				"email": user.Email,
 			},
 		)
-
 		if err != nil {
 			http.Error(w, "DB operation failed", http.StatusInternalServerError)
 			return
@@ -630,4 +643,26 @@ func hashPassword(password string) (string, error) {
 func checkPasswordHash(password string, hash string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 	return err == nil
+}
+
+func emailExists(ctx context.Context, session neo4j.SessionWithContext, email string) (bool, error) {
+	res, err := session.Run(ctx, `
+		MATCH (u:User {email: $email})
+		RETURN COUNT(u) > 0 AS exists
+	`, map[string]any{"email": email})
+	if err != nil {
+		return false, err
+	}
+
+	record, err := res.Single(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	exists, ok := record.Get("exists")
+	if !ok {
+		return false, nil
+	}
+
+	return exists.(bool), nil
 }
