@@ -14,6 +14,7 @@ func RegisterRoutes(r chi.Router, app *app.App) {
 		r.Post("/{id}/unfollow/{second-id}", handlers.UnfollowUserHandler(app))
 		r.Post("/{id}/like/{post-id}", handlers.LikePostRequest(app))
 		r.Post("/{id}/dislike/{post-id}", handlers.DislikePostRequest(app))
+		r.Post("/login", handlers.LoginHandler(app))
 		r.Get("/", handlers.GetAllUsersHandler(app))
 		r.Get("/{id}", handlers.GetUserByIdHandler(app))
 		r.Get("/{id}/followers", handlers.GetFollowersRequest(app))

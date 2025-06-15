@@ -86,6 +86,56 @@ func CreateUserHandler(app *app.App) http.HandlerFunc {
 	}
 }
 
+func LoginHandler(app *app.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		session := app.DB.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
+		defer session.Close(ctx)
+
+		type LoginRequest struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+
+		var req LoginRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		res, err := session.Run(ctx,
+			`MATCH (u:User)
+			 WHERE u.email = $email
+			 RETURN u.password AS hash, id(u) as id, properties(u) as props`,
+			map[string]any{"email": req.Email})
+
+		if err != nil || !res.Next(ctx) {
+			http.Error(w, "User not found", http.StatusUnauthorized)
+			return
+		}
+
+		record := res.Record()
+		storedHash := record.Values[0].(string)
+
+		if !checkPasswordHash(req.Password, storedHash) {
+			http.Error(w, "Invalid password", http.StatusUnauthorized)
+			return
+		}
+
+		userId := record.Values[1].(int64)
+		props := record.Values[2].(map[string]any)
+
+		user := map[string]any{
+			"id":    userId,
+			"name":  props["name"],
+			"email": props["email"],
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(user)
+	}
+}
+
 func createUserImgsDir(id int64) {
 	if err := os.MkdirAll(fmt.Sprintf("imgs/user-%d", id), os.ModePerm); err != nil {
 		log.Fatal(err)
