@@ -215,64 +215,7 @@ func GetAllPostsHandler(app *app.App) http.HandlerFunc {
 			return
 		}
 
-		var posts []models.Post
-
-		for res.Next(ctx) {
-			record := res.Record()
-
-			node, ok := record.Get("p")
-			if !ok {
-				continue
-			}
-			postNode := node.(neo4j.Node)
-			props := postNode.Props
-
-			userIdRaw, ok := record.Get("userId")
-			if !ok {
-				continue
-			}
-			userId := int64(userIdRaw.(int64))
-
-			userNameRaw, ok := record.Get("userName")
-			if !ok {
-				continue
-			}
-			userName := userNameRaw.(string)
-
-			var base64Images []string
-			if imagesRaw, ok := props["images"].([]any); ok {
-				for _, img := range imagesRaw {
-					if pathStr, ok := img.(string); ok {
-						imageBytes, err := os.ReadFile(pathStr)
-						if err != nil {
-							log.Printf("Erro ao ler imagem %s: %v", pathStr, err)
-							continue
-						}
-						base64Images = append(base64Images, base64.StdEncoding.EncodeToString(imageBytes))
-					}
-				}
-			}
-
-			var createdAt time.Time
-			if createdAtStr, ok := props["created_at"].(string); ok {
-				createdAt, err = time.Parse(time.RFC3339, createdAtStr)
-				if err != nil {
-					log.Printf("Erro ao converter created_at: %v", err)
-					createdAt = time.Time{}
-				}
-			}
-
-			post := models.Post{
-				Id:          postNode.GetId(),
-				UserID:      userId,
-				UserName:    userName,
-				Description: props["description"].(string),
-				Images:      base64Images,
-				CreatedAt:   createdAt,
-			}
-
-			posts = append(posts, post)
-		}
+		posts := postRecordsToJSON(ctx, res)
 
 		if err = res.Err(); err != nil {
 			http.Error(w, "Result iteration error", http.StatusInternalServerError)
@@ -306,65 +249,7 @@ func GetPostsFromUserRequest(app *app.App) http.HandlerFunc {
 			return
 		}
 
-		var posts []models.Post
-
-		for res.Next(ctx) {
-			record := res.Record()
-
-			node, ok := record.Get("p")
-			if !ok {
-				continue
-			}
-
-			postNode := node.(neo4j.Node)
-			props := postNode.Props
-
-			userIdRaw, ok := record.Get("userId")
-			if !ok {
-				continue
-			}
-			userId := int64(userIdRaw.(int64))
-
-			userNameRaw, ok := record.Get("userName")
-			if !ok {
-				continue
-			}
-			userName := userNameRaw.(string)
-
-			var base64Images []string
-			if imagesRaw, ok := props["images"].([]any); ok {
-				for _, img := range imagesRaw {
-					if pathStr, ok := img.(string); ok {
-						imageBytes, err := os.ReadFile(pathStr)
-						if err != nil {
-							log.Printf("Erro ao ler imagem %s: %v", pathStr, err)
-							continue
-						}
-						base64Images = append(base64Images, base64.StdEncoding.EncodeToString(imageBytes))
-					}
-				}
-			}
-
-			var createdAt time.Time
-			if createdAtStr, ok := props["created_at"].(string); ok {
-				createdAt, err = time.Parse(time.RFC3339, createdAtStr)
-				if err != nil {
-					log.Printf("Erro ao converter created_at: %v", err)
-					createdAt = time.Time{}
-				}
-			}
-
-			post := models.Post{
-				Id:          postNode.GetId(),
-				UserID:      userId,
-				UserName:    userName,
-				Description: props["description"].(string),
-				CreatedAt:   createdAt,
-				Images:      base64Images,
-			}
-
-			posts = append(posts, post)
-		}
+		posts := postRecordsToJSON(ctx, res)
 
 		if err = res.Err(); err != nil {
 			http.Error(w, "Result iteration error", http.StatusInternalServerError)
@@ -376,6 +261,71 @@ func GetPostsFromUserRequest(app *app.App) http.HandlerFunc {
 	}
 }
 
+func postRecordsToJSON(ctx context.Context, res neo4j.ResultWithContext) []models.Post {
+	var posts []models.Post
+
+	for res.Next(ctx) {
+		record := res.Record()
+
+		node, ok := record.Get("p")
+		if !ok {
+			continue
+		}
+
+		postNode := node.(neo4j.Node)
+		props := postNode.Props
+
+		userIdRaw, ok := record.Get("userId")
+		if !ok {
+			continue
+		}
+		userId := int64(userIdRaw.(int64))
+
+		userNameRaw, ok := record.Get("userName")
+		if !ok {
+			continue
+		}
+		userName := userNameRaw.(string)
+
+		var base64Images []string
+		if imagesRaw, ok := props["images"].([]any); ok {
+			for _, img := range imagesRaw {
+				if pathStr, ok := img.(string); ok {
+					imageBytes, err := os.ReadFile(pathStr)
+					if err != nil {
+						log.Printf("Erro ao ler imagem %s: %v", pathStr, err)
+						continue
+					}
+					base64Images = append(base64Images, base64.StdEncoding.EncodeToString(imageBytes))
+				}
+			}
+		}
+
+		var createdAt time.Time
+		if createdAtStr, ok := props["created_at"].(string); ok {
+			newCreatedAt, err := time.Parse(time.RFC3339, createdAtStr)
+			if err != nil {
+				log.Printf("Erro ao converter created_at: %v", err)
+				createdAt = time.Time{}
+			} else {
+				createdAt = newCreatedAt
+			}
+		}
+
+		post := models.Post{
+			Id:          postNode.GetId(),
+			UserID:      userId,
+			UserName:    userName,
+			Description: props["description"].(string),
+			CreatedAt:   createdAt,
+			Images:      base64Images,
+		}
+
+		posts = append(posts, post)
+	}
+
+	return posts
+}
 
 func getImagesRecord(record *neo4j.Record, prop string) []string {
 	imagesAny, ok := record.Get(prop)
