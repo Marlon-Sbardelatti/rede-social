@@ -208,60 +208,6 @@ func GetUserByIdHandler(app *app.App) http.HandlerFunc {
 	}
 }
 
-func GetProfileHandler(app *app.App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := context.Background()
-		session := app.DB.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
-		defer session.Close(ctx)
-
-		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-		if err != nil {
-			http.Error(w, "Couldn't parse the url param", http.StatusInternalServerError)
-			return
-		}
-
-		type ProfileRequest struct {
-			UserId int64 `json:"user_id"`
-		}
-
-		var req ProfileRequest
-		err = json.NewDecoder(r.Body).Decode(&req)
-		if err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
-		}
-
-		res, err := session.Run(
-			ctx,
-			`MATCH (u:User) WHERE id(u) = $profileId
-			 OPTIONAL MATCH (requester:User)-[:FOLLOWS]->(u)
-			 WHERE id(requester) = $requesterId
-			 OPTIONAL MATCH (u)-[:POSTED]->(p:Post)
-			 OPTIONAL MATCH (follower:User)-[:FOLLOWS]->(u)
-			 OPTIONAL MATCH (u)-[:FOLLOWS]->(followed:User)
-			 RETURN 
-				id(u) AS id, 
-				properties(u) AS props,
-				CASE WHEN requester IS NULL THEN false ELSE true END AS isFollower, 
-			    COUNT(DISTINCT p) as postCount, 
-			    COUNT(DISTINCT follower) as totalFollowers,
-			    COUNT(DISTINCT followed) as totalFollowed`,
-			map[string]any{"profileId": id, "requesterId": req.UserId},
-		)
-
-		if err != nil {
-			http.Error(w, "DB operation failed", http.StatusInternalServerError)
-			return
-		}
-
-		user := recordToJSON(ctx, w, res)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(user)
-	}
-}
-
 func GetUserByEmailHandler(app *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
@@ -681,27 +627,8 @@ func recordToJSON(ctx context.Context, w http.ResponseWriter, res neo4j.ResultWi
 		http.Error(w, "Error converting properties", http.StatusInternalServerError)
 		return nil
 	}
+
 	propsMap["id"] = resId
-
-	follows, ok := record.Get("isFollower")
-	if ok {
-		propsMap["follows"] = follows
-	}
-
-	postCount, ok := record.Get("postCount")
-	if ok {
-		propsMap["postCount"] = postCount
-	}
-
-	totalFollowers, ok := record.Get("totalFollowers")
-	if ok {
-		propsMap["followers"] = totalFollowers
-	}
-
-	totalFollowed, ok := record.Get("totalFollowed")
-	if ok {
-		propsMap["following"] = totalFollowed
-	}
 
 	user, err := json.Marshal(propsMap)
 	if err != nil {
