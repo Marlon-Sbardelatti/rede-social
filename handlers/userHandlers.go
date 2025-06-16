@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,7 +45,6 @@ func CreateUserHandler(app *app.App) http.HandlerFunc {
 			return
 		}
 
-		// Cria usuário
 		psw, err := hashPassword(user.Password)
 		if err != nil {
 			http.Error(w, "Failed to hash user password", http.StatusInternalServerError)
@@ -81,6 +81,24 @@ func CreateUserHandler(app *app.App) http.HandlerFunc {
 		}
 
 		createUserImgsDir(userIdInt)
+		profilePicPath := createProfilePicture(user.Image, userIdInt, w)
+		if profilePicPath == "" {
+			http.Error(w, "Could not save user image", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = session.Run(
+			ctx,
+			`MATCH (u:User)
+			 WHERE id(u) = $id
+			 SET u.image = $imagePath`,
+			map[string]any{"id": userIdInt, "imagePath": profilePicPath},
+		)
+		if err != nil {
+			http.Error(w, "DB operation failed", http.StatusInternalServerError)
+			return
+		}
+
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte("User created"))
 	}
@@ -756,6 +774,29 @@ func usersToJson(ctx context.Context, res neo4j.ResultWithContext, prop string) 
 	}
 
 	return usersJson, nil
+}
+
+func createProfilePicture(imgString string, userId int64, w http.ResponseWriter) string {
+	dirPath := fmt.Sprintf("imgs/user-%d/profile-picture/", userId)
+	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
+		http.Error(w, "Failed to profile picture", http.StatusInternalServerError)
+		return ""
+	}
+
+	imageBytes, err := base64.StdEncoding.DecodeString(imgString)
+	if err != nil {
+		http.Error(w, "Invalid base64 data", http.StatusBadRequest)
+		return ""
+	}
+	filepath := dirPath + "profile-picture.png"
+
+	err = os.WriteFile(filepath, imageBytes, 0644)
+	if err != nil {
+		http.Error(w, "Failed to save image", http.StatusInternalServerError)
+		return ""
+	}
+
+	return filepath
 }
 
 func hashPassword(password string) (string, error) {
