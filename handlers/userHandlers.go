@@ -179,9 +179,9 @@ func GetAllUsersHandler(app *app.App) http.HandlerFunc {
 			return
 		}
 
-		usersJson, err := usersToJson(ctx, res, "u")
+		usersJson, err, code := usersToJson(ctx, res, "u")
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), code)
 			return
 		}
 
@@ -490,7 +490,7 @@ func UnfollowUserHandler(app *app.App) http.HandlerFunc {
 	}
 }
 
-func GetFollowersRequest(app *app.App) http.HandlerFunc {
+func GetFollowersHandler(app *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 		session := app.DB.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
@@ -516,9 +516,9 @@ func GetFollowersRequest(app *app.App) http.HandlerFunc {
 			return
 		}
 
-		usersJson, err := usersToJson(ctx, res, "follower")
+		usersJson, err, code := usersToJson(ctx, res, "follower")
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), code)
 			return
 		}
 
@@ -529,7 +529,7 @@ func GetFollowersRequest(app *app.App) http.HandlerFunc {
 	}
 }
 
-func GetFollowingRequest(app *app.App) http.HandlerFunc {
+func GetFollowingHandler(app *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 		session := app.DB.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
@@ -555,9 +555,9 @@ func GetFollowingRequest(app *app.App) http.HandlerFunc {
 			return
 		}
 
-		usersJson, err := usersToJson(ctx, res, "followed")
+		usersJson, err, code := usersToJson(ctx, res, "followed")
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), code)
 			return
 		}
 
@@ -568,7 +568,7 @@ func GetFollowingRequest(app *app.App) http.HandlerFunc {
 	}
 }
 
-func LikePostRequest(app *app.App) http.HandlerFunc {
+func LikePostHandler(app *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 		session := app.DB.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
@@ -621,7 +621,7 @@ func LikePostRequest(app *app.App) http.HandlerFunc {
 	}
 }
 
-func DislikePostRequest(app *app.App) http.HandlerFunc {
+func DislikePostHandler(app *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 		session := app.DB.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
@@ -757,7 +757,7 @@ func getIDsRecord(record *neo4j.Record, prop string) []int64 {
 	return idList
 }
 
-func usersToJson(ctx context.Context, res neo4j.ResultWithContext, prop string) ([]byte, error) {
+func usersToJson(ctx context.Context, res neo4j.ResultWithContext, prop string) ([]byte, error, int) {
 	var users []models.User
 	for res.Next(ctx) {
 		record := res.Record()
@@ -768,7 +768,7 @@ func usersToJson(ctx context.Context, res neo4j.ResultWithContext, prop string) 
 			img, err := imageToBase64(user_attr["image"].(string))
 
 			if err != nil {
-				return nil, errors.New("Error encoding user to JSON")
+				return nil, errors.New("Error encoding user to JSON"), 500
 			}
 
 			user := models.User{
@@ -783,12 +783,16 @@ func usersToJson(ctx context.Context, res neo4j.ResultWithContext, prop string) 
 		}
 	}
 
-	usersJson, err := json.Marshal(users)
-	if err != nil {
-		return nil, errors.New("Error encoding users to JSON")
+	if len(users) == 0 {
+		return nil, errors.New("Not Found"), 404
 	}
 
-	return usersJson, nil
+	usersJson, err := json.Marshal(users)
+	if err != nil {
+		return nil, errors.New("Error encoding users to JSON"), 500
+	}
+
+	return usersJson, nil, 200
 }
 
 func imageToBase64(imagePath string) (string, error) {

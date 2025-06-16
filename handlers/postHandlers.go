@@ -17,7 +17,7 @@ import (
 	"main.go/models"
 )
 
-func CreatePostRequest(app *app.App) http.HandlerFunc {
+func CreatePostHandler(app *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		err := r.ParseMultipartForm(0)
 		if err != nil {
@@ -99,7 +99,7 @@ func CreatePostRequest(app *app.App) http.HandlerFunc {
 	}
 }
 
-func DeletePostRequest(app *app.App) http.HandlerFunc {
+func DeletePostHandler(app *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 		session := app.DB.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
@@ -226,7 +226,7 @@ func GetAllPostsHandler(app *app.App) http.HandlerFunc {
 	}
 }
 
-func GetPostsFromUserRequest(app *app.App) http.HandlerFunc {
+func GetPostsFromUserHandler(app *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 		session := app.DB.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
