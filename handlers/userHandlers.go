@@ -721,6 +721,15 @@ func recordToJSON(ctx context.Context, w http.ResponseWriter, res neo4j.ResultWi
 		propsMap["following"] = totalFollowed
 	}
 
+	img, err := imageToBase64(propsMap["image"].(string))
+
+	if err != nil {
+		http.Error(w, "Error encoding user to JSON", http.StatusInternalServerError)
+		return nil
+	}
+
+	propsMap["image"] = img
+
 	user, err := json.Marshal(propsMap)
 	if err != nil {
 		http.Error(w, "Error encoding user to JSON", http.StatusInternalServerError)
@@ -756,12 +765,18 @@ func usersToJson(ctx context.Context, res neo4j.ResultWithContext, prop string) 
 		node, ok := record.Get(prop)
 		if ok {
 			user_attr := node.(neo4j.Node).Props
+			img, err := imageToBase64(user_attr["image"].(string))
+
+			if err != nil {
+				return nil, errors.New("Error encoding user to JSON")
+			}
 
 			user := models.User{
 				Id:       node.(neo4j.Node).GetId(),
 				Name:     user_attr["name"].(string),
 				Email:    user_attr["email"].(string),
 				Password: user_attr["password"].(string),
+				Image:    img,
 			}
 
 			users = append(users, user)
@@ -774,6 +789,16 @@ func usersToJson(ctx context.Context, res neo4j.ResultWithContext, prop string) 
 	}
 
 	return usersJson, nil
+}
+
+func imageToBase64(imagePath string) (string, error) {
+	imageBytes, err := os.ReadFile(imagePath)
+	if err != nil {
+		return "", errors.New(fmt.Sprintf("Erro ao ler imagem %s: %v", imagePath, err))
+	}
+
+	imageEncoded := base64.StdEncoding.EncodeToString(imageBytes)
+	return imageEncoded, nil
 }
 
 func createProfilePicture(imgString string, userId int64, w http.ResponseWriter) string {
