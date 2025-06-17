@@ -6,15 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/go-chi/chi/v5"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"golang.org/x/crypto/bcrypt"
+	"io"
 	"log"
-	"main.go/app"
-	"main.go/models"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"strconv"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"golang.org/x/crypto/bcrypt"
+	"main.go/app"
+	"main.go/models"
 )
 
 func CreateUserHandler(app *app.App) http.HandlerFunc {
@@ -23,18 +26,17 @@ func CreateUserHandler(app *app.App) http.HandlerFunc {
 		session := app.DB.NewSession(ctx, neo4j.SessionConfig{DatabaseName: "neo4j"})
 		defer session.Close(ctx)
 
-		var user models.User
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
+		name := r.FormValue("name")
+		email := r.FormValue("email")
+		password := r.FormValue("password")
 
-		err := decoder.Decode(&user)
-		if err != nil || user.Name == "" || user.Email == "" || user.Password == "" {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		if name == "" || email == "" || password == "" {
+			http.Error(w, "Missing required fields", http.StatusBadRequest)
 			return
 		}
 
-		// Verifica se e-mail já está em uso
-		exists, err := emailExists(ctx, session, user.Email)
+		// Verifica se o email ja existe
+		exists, err := emailExists(ctx, session, email)
 		if err != nil {
 			http.Error(w, "Failed to check email", http.StatusInternalServerError)
 			return
@@ -44,9 +46,9 @@ func CreateUserHandler(app *app.App) http.HandlerFunc {
 			return
 		}
 
-		psw, err := hashPassword(user.Password)
+		hashedPassword, err := hashPassword(password)
 		if err != nil {
-			http.Error(w, "Failed to hash user password", http.StatusInternalServerError)
+			http.Error(w, "Failed to hash password", http.StatusInternalServerError)
 			return
 		}
 
@@ -54,7 +56,7 @@ func CreateUserHandler(app *app.App) http.HandlerFunc {
 			ctx,
 			`CREATE (u:User {name: $name, email: $email, password: $password})
 			 RETURN id(u) AS id`,
-			map[string]any{"name": user.Name, "email": user.Email, "password": psw},
+			map[string]any{"name": name, "email": email, "password": hashedPassword},
 		)
 		if err != nil {
 			http.Error(w, "DB operation failed", http.StatusInternalServerError)
@@ -73,29 +75,32 @@ func CreateUserHandler(app *app.App) http.HandlerFunc {
 			return
 		}
 
-		userIdInt, ok := resId.(int64)
+		userId, ok := resId.(int64)
 		if !ok {
 			http.Error(w, "Invalid user ID type", http.StatusInternalServerError)
 			return
 		}
 
-		createUserImgsDir(userIdInt)
-		profilePicPath := createProfilePicture(user.Image, userIdInt, w)
-		if profilePicPath == "" {
-			http.Error(w, "Could not save user image", http.StatusInternalServerError)
-			return
-		}
+		createUserImgsDir(userId)
 
-		_, err = session.Run(
-			ctx,
-			`MATCH (u:User)
-			 WHERE id(u) = $id
-			 SET u.image = $imagePath`,
-			map[string]any{"id": userIdInt, "imagePath": profilePicPath},
-		)
-		if err != nil {
-			http.Error(w, "DB operation failed", http.StatusInternalServerError)
-			return
+		_, fileHeader, err := r.FormFile("image")
+		// user tem img
+		if err == nil {
+
+			filename, err, code := createProfilePicture(userId, fileHeader)
+			if err != nil {
+				http.Error(w, err.Error(), code)
+			}
+
+			_, err = session.Run(
+				ctx,
+				`MATCH (u:User) WHERE id(u) = $id SET u.image = $imagePath`,
+				map[string]any{"id": userId, "imagePath": filename},
+			)
+			if err != nil {
+				http.Error(w, "Failed to update image path", http.StatusInternalServerError)
+				return
+			}
 		}
 
 		w.WriteHeader(http.StatusCreated)
@@ -714,14 +719,16 @@ func recordToJSON(ctx context.Context, w http.ResponseWriter, res neo4j.ResultWi
 		propsMap["following"] = totalFollowed
 	}
 
-	img, err := ImageToBase64(propsMap["image"].(string))
+	if propsMap["image"] != nil {
+		img, err := ImageToBase64(propsMap["image"].(string))
 
-	if err != nil {
-		http.Error(w, "Error encoding user to JSON", http.StatusInternalServerError)
-		return nil
+		if err != nil {
+			http.Error(w, "Error encoding user to JSON", http.StatusInternalServerError)
+			return nil
+		}
+
+		propsMap["image"] = img
 	}
-
-	propsMap["image"] = img
 
 	user, err := json.Marshal(propsMap)
 	if err != nil {
@@ -757,19 +764,32 @@ func usersToJson(ctx context.Context, res neo4j.ResultWithContext, prop string) 
 
 		node, ok := record.Get(prop)
 		if ok {
+			var user models.User
 			user_attr := node.(neo4j.Node).Props
-			img, err := ImageToBase64(user_attr["image"].(string))
 
-			if err != nil {
-				return nil, errors.New("Error encoding user to JSON"), 500
-			}
+			imgPath := user_attr["image"]
+			if imgPath != nil {
+				// user com imagem
+				img, err := ImageToBase64(user_attr["image"].(string))
 
-			user := models.User{
-				Id:       node.(neo4j.Node).GetId(),
-				Name:     user_attr["name"].(string),
-				Email:    user_attr["email"].(string),
-				Password: user_attr["password"].(string),
-				Image:    img,
+				if err != nil {
+					return nil, errors.New("Error encoding user to JSON"), 500
+				}
+				user = models.User{
+					Id:       node.(neo4j.Node).GetId(),
+					Name:     user_attr["name"].(string),
+					Email:    user_attr["email"].(string),
+					Password: user_attr["password"].(string),
+					Image:    img,
+				}
+			} else {
+				// user sem imagem
+				user = models.User{
+					Id:       node.(neo4j.Node).GetId(),
+					Name:     user_attr["name"].(string),
+					Email:    user_attr["email"].(string),
+					Password: user_attr["password"].(string),
+				}
 			}
 
 			users = append(users, user)
@@ -798,27 +818,36 @@ func ImageToBase64(imagePath string) (string, error) {
 	return imageEncoded, nil
 }
 
-func createProfilePicture(imgString string, userId int64, w http.ResponseWriter) string {
+func createProfilePicture(userId int64, fileHeader *multipart.FileHeader) (string, error, int) {
+	if fileHeader.Size > (50 << 20) {
+		return "", errors.New("File too large"), 400
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		return "", errors.New("Invalid image"), 400
+	}
+	defer file.Close()
+
 	dirPath := fmt.Sprintf("imgs/user-%d/profile-picture/", userId)
 	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
-		http.Error(w, "Failed to profile picture", http.StatusInternalServerError)
-		return ""
+		return "", errors.New("Failed to save profile picture"), 500
 	}
 
-	imageBytes, err := base64.StdEncoding.DecodeString(imgString)
+	filename := dirPath + "profile-picture.png"
+
+	outFile, err := os.Create(filename)
 	if err != nil {
-		http.Error(w, "Invalid base64 data", http.StatusBadRequest)
-		return ""
+		return "", errors.New("Failed to save image"), 500
 	}
-	filepath := dirPath + "profile-picture.png"
+	defer outFile.Close()
 
-	err = os.WriteFile(filepath, imageBytes, 0644)
+	_, err = io.Copy(outFile, file)
 	if err != nil {
-		http.Error(w, "Failed to save image", http.StatusInternalServerError)
-		return ""
+		return "", errors.New("Failed to save image"), 500
 	}
 
-	return filepath
+	return filename, nil, 200
 }
 
 func hashPassword(password string) (string, error) {
