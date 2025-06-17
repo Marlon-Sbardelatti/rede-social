@@ -315,25 +315,45 @@ func postRecordsToJSON(ctx context.Context, res neo4j.ResultWithContext) ([]mode
 			}
 		}
 
+		var post models.Post
+
 		userImagePath, ok := record.Get("profilePicture")
-		if !ok {
-			return nil, errors.New("Could not get path from user image"), 500
+		if userImagePath != nil {
+			userImage, err := ImageToBase64(userImagePath.(string))
+			if err != nil {
+				return nil, errors.New("Could not convert user image to base64"), 500
+			}
+			post = models.Post{
+				Id:          postNode.GetId(),
+				UserID:      userId,
+				UserName:    userName,
+				Description: props["description"].(string),
+				CreatedAt:   createdAt,
+				Images:      base64Images,
+				UserImage:   userImage,
+			}
+
+		} else {
+			post = models.Post{
+				Id:          postNode.GetId(),
+				UserID:      userId,
+				UserName:    userName,
+				Description: props["description"].(string),
+				CreatedAt:   createdAt,
+				Images:      base64Images,
+			}
+
 		}
 
-		userImage, err := ImageToBase64(userImagePath.(string))
-		if err != nil {
-			return nil, errors.New("Could not convert user image to base64"), 500
-		}
+		// userImagePath, ok := record.Get("profilePicture")
+		// if !ok {
+		// 	return nil, errors.New("Could not get path from user image"), 500
+		// }
 
-		post := models.Post{
-			Id:          postNode.GetId(),
-			UserID:      userId,
-			UserName:    userName,
-			Description: props["description"].(string),
-			CreatedAt:   createdAt,
-			Images:      base64Images,
-			UserImage:   userImage,
-		}
+		// userImage, err := ImageToBase64(userImagePath.(string))
+		// if err != nil {
+		// 	return nil, errors.New("Could not convert user image to base64"), 500
+		// }
 
 		posts = append(posts, post)
 	}
