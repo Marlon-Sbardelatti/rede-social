@@ -241,7 +241,7 @@ func GetProfileHandler(app *app.App) http.HandlerFunc {
 			return
 		}
 
-		requesterId, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		requesterId, err := strconv.ParseInt(chi.URLParam(r, "requesterId"), 10, 64)
 		if err != nil {
 			http.Error(w, "Couldn't parse the url param", http.StatusInternalServerError)
 			return
