@@ -8,6 +8,7 @@ type Post struct {
 	UserName    string    `json:"username"`
 	Description string    `json:"description"`
 	Images      []string  `json:"images"`
+	UserImage   string    `json:"user_image"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 

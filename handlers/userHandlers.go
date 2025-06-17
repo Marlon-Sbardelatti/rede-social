@@ -6,16 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
-	"net/http"
-	"os"
-	"strconv"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"golang.org/x/crypto/bcrypt"
+	"log"
 	"main.go/app"
 	"main.go/models"
+	"net/http"
+	"os"
+	"strconv"
 )
 
 func CreateUserHandler(app *app.App) http.HandlerFunc {
@@ -158,7 +157,6 @@ func createUserImgsDir(id int64) {
 	if err := os.MkdirAll(fmt.Sprintf("imgs/user-%d", id), os.ModePerm); err != nil {
 		log.Fatal(err)
 	}
-
 }
 
 func GetAllUsersHandler(app *app.App) http.HandlerFunc {
@@ -238,14 +236,9 @@ func GetProfileHandler(app *app.App) http.HandlerFunc {
 			return
 		}
 
-		type ProfileRequest struct {
-			UserId int64 `json:"user_id"`
-		}
-
-		var req ProfileRequest
-		err = json.NewDecoder(r.Body).Decode(&req)
+		requesterId, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 		if err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			http.Error(w, "Couldn't parse the url param", http.StatusInternalServerError)
 			return
 		}
 
@@ -264,7 +257,7 @@ func GetProfileHandler(app *app.App) http.HandlerFunc {
 			    COUNT(DISTINCT p) as postCount, 
 			    COUNT(DISTINCT follower) as totalFollowers,
 			    COUNT(DISTINCT followed) as totalFollowed`,
-			map[string]any{"profileId": id, "requesterId": req.UserId},
+			map[string]any{"profileId": id, "requesterId": requesterId},
 		)
 
 		if err != nil {
@@ -721,7 +714,7 @@ func recordToJSON(ctx context.Context, w http.ResponseWriter, res neo4j.ResultWi
 		propsMap["following"] = totalFollowed
 	}
 
-	img, err := imageToBase64(propsMap["image"].(string))
+	img, err := ImageToBase64(propsMap["image"].(string))
 
 	if err != nil {
 		http.Error(w, "Error encoding user to JSON", http.StatusInternalServerError)
@@ -765,7 +758,7 @@ func usersToJson(ctx context.Context, res neo4j.ResultWithContext, prop string) 
 		node, ok := record.Get(prop)
 		if ok {
 			user_attr := node.(neo4j.Node).Props
-			img, err := imageToBase64(user_attr["image"].(string))
+			img, err := ImageToBase64(user_attr["image"].(string))
 
 			if err != nil {
 				return nil, errors.New("Error encoding user to JSON"), 500
@@ -795,7 +788,7 @@ func usersToJson(ctx context.Context, res neo4j.ResultWithContext, prop string) 
 	return usersJson, nil, 200
 }
 
-func imageToBase64(imagePath string) (string, error) {
+func ImageToBase64(imagePath string) (string, error) {
 	imageBytes, err := os.ReadFile(imagePath)
 	if err != nil {
 		return "", errors.New(fmt.Sprintf("Erro ao ler imagem %s: %v", imagePath, err))

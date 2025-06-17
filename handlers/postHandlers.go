@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"time"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"main.go/app"
@@ -207,19 +209,22 @@ func GetAllPostsHandler(app *app.App) http.HandlerFunc {
 
 		res, err := session.Run(ctx, `
 			MATCH (u:User)-[:POSTED]->(p:Post)
-			RETURN p, id(u) AS userId, u.name AS userName
-		`, nil)
+			RETURN p, id(u) AS userId, u.name AS userName, u.image as profilePicture`, nil)
 		if err != nil {
 			http.Error(w, "DB operation failed", http.StatusInternalServerError)
 			return
 		}
 
-		posts := postRecordsToJSON(ctx, res)
-
-		if err = res.Err(); err != nil {
-			http.Error(w, "Result iteration error", http.StatusInternalServerError)
+		posts, err, code := postRecordsToJSON(ctx, res)
+		if err != nil {
+			http.Error(w, err.Error(), code)
 			return
 		}
+
+		// if err = res.Err(); err != nil {
+		// 	http.Error(w, "Result iteration error", http.StatusInternalServerError)
+		// 	return
+		// }
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(posts)
@@ -241,26 +246,30 @@ func GetPostsFromUserHandler(app *app.App) http.HandlerFunc {
 		res, err := session.Run(ctx, `
 			MATCH (u:User)-[:POSTED]->(p:Post)
 			WHERE id(u) = $id
-			RETURN p, id(u) AS userId, u.name AS userName
+			RETURN p, id(u) AS userId, u.name AS userName, u.image AS profilePicture
 		`, map[string]any{"id": id})
 		if err != nil {
 			http.Error(w, "DB operation failed", http.StatusInternalServerError)
 			return
 		}
 
-		posts := postRecordsToJSON(ctx, res)
-
-		if err = res.Err(); err != nil {
-			http.Error(w, "Result iteration error", http.StatusInternalServerError)
+		posts, err, code := postRecordsToJSON(ctx, res)
+		if err != nil {
+			http.Error(w, err.Error(), code)
 			return
 		}
+
+		// if err = res.Err(); err != nil {
+		// 	http.Error(w, "Result iteration error", http.StatusInternalServerError)
+		// 	return
+		// }
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(posts)
 	}
 }
 
-func postRecordsToJSON(ctx context.Context, res neo4j.ResultWithContext) []models.Post {
+func postRecordsToJSON(ctx context.Context, res neo4j.ResultWithContext) ([]models.Post, error, int) {
 	var posts []models.Post
 
 	for res.Next(ctx) {
@@ -268,7 +277,7 @@ func postRecordsToJSON(ctx context.Context, res neo4j.ResultWithContext) []model
 
 		node, ok := record.Get("p")
 		if !ok {
-			continue
+			return nil, errors.New("Could not find post"), 404
 		}
 
 		postNode := node.(neo4j.Node)
@@ -276,13 +285,13 @@ func postRecordsToJSON(ctx context.Context, res neo4j.ResultWithContext) []model
 
 		userIdRaw, ok := record.Get("userId")
 		if !ok {
-			continue
+			return nil, errors.New("Could not find user"), 404
 		}
 		userId := int64(userIdRaw.(int64))
 
 		userNameRaw, ok := record.Get("userName")
 		if !ok {
-			continue
+			return nil, errors.New("Could not find user"), 404
 		}
 		userName := userNameRaw.(string)
 
@@ -311,6 +320,16 @@ func postRecordsToJSON(ctx context.Context, res neo4j.ResultWithContext) []model
 			}
 		}
 
+		userImagePath, ok := record.Get("profilePicture")
+		if !ok {
+			return nil, errors.New("Could not get path from user image"), 500
+		}
+
+		userImage, err := ImageToBase64(userImagePath.(string))
+		if err != nil {
+			return nil, errors.New("Could not convert user image to base64"), 500
+		}
+
 		post := models.Post{
 			Id:          postNode.GetId(),
 			UserID:      userId,
@@ -318,12 +337,13 @@ func postRecordsToJSON(ctx context.Context, res neo4j.ResultWithContext) []model
 			Description: props["description"].(string),
 			CreatedAt:   createdAt,
 			Images:      base64Images,
+			UserImage:   userImage,
 		}
 
 		posts = append(posts, post)
 	}
 
-	return posts
+	return posts, nil, 200
 }
 
 func getImagesRecord(record *neo4j.Record, prop string) []string {
