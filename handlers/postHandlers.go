@@ -221,11 +221,6 @@ func GetAllPostsHandler(app *app.App) http.HandlerFunc {
 			return
 		}
 
-		// if err = res.Err(); err != nil {
-		// 	http.Error(w, "Result iteration error", http.StatusInternalServerError)
-		// 	return
-		// }
-
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(posts)
 	}
@@ -341,6 +336,10 @@ func postRecordsToJSON(ctx context.Context, res neo4j.ResultWithContext) ([]mode
 		}
 
 		posts = append(posts, post)
+	}
+
+	if len(posts) == 0 {
+		return nil, errors.New("Not Found"), 404
 	}
 
 	return posts, nil, 200
